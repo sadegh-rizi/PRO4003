@@ -78,7 +78,7 @@ interior = interiorNodeIndices(N, discardN, nodeRng, minNodes);
 % -------- crossing (arrival) time at each interior node --------
 arrival = nan(1, numel(interior));
 for q = 1:numel(interior)
-    arrival(q) = thresholdCrossTime(MEMBRANE_POTENTIAL(:, interior(q)), dt, vcross, doInterp);
+    arrival(q) = arrivalTime(MEMBRANE_POTENTIAL(:, interior(q)), dt, vcross, doInterp);
 end
 
 fired      = ~isnan(arrival);
@@ -128,33 +128,7 @@ end
 
 
 % ===================== local helpers =====================
-
-function tc = thresholdCrossTime(Vcol, dt, vcross, doInterp)
-%THRESHOLDCROSSTIME  First upward crossing of vcross (ms), or NaN if none.
-Vcol  = Vcol(:);
-above = Vcol > vcross;
-if ~any(above)
-    tc = NaN;
-    return
-end
-m = find(above, 1, 'first');   % first sample at/above threshold
-if m == 1 || ~doInterp
-    tc = (m - 1) * dt;          % sample n has time (n-1)*dt
-    return
-end
-% Linear interpolation between samples m-1 (below) and m (at/above).
-v0 = Vcol(m - 1);
-v1 = Vcol(m);
-denom = v1 - v0;
-if denom == 0
-    frac = 0;
-else
-    frac = (vcross - v0) / denom;
-end
-frac = min(max(frac, 0), 1);
-tc = ((m - 1) - 1) * dt + frac * dt;
-end
-
+% (arrival-time logic lives in the shared AuxiliaryFunctions/arrivalTime.m)
 
 function val = getOption(args, name, default)
 %GETOPTION  Minimal case-insensitive name/value option reader.
