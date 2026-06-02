@@ -1,13 +1,24 @@
-function [MEMBRANE_POTENTIAL, INTERNODE_LENGTH, TIME_VECTOR] = Model(par, filename, isVerbose)
+function [MEMBRANE_POTENTIAL, INTERNODE_LENGTH, TIME_VECTOR, CURRENTS] = Model(par, filename, isVerbose, recordCurrents)
 %%MODEL - run myelinated axon model
-%   [membrane potential, internode length, time] = MODEL(par, filename, verbose)
+%   [membrane potential, internode length, time, currents] = MODEL(par, filename, verbose, recordCurrents)
 %       Outputs:
 %           membrane potential -        (TxN)-array, where T is the number of time points simulated and N is
-%                                       the number of node segments in the simulation, giving membrane potential 
+%                                       the number of node segments in the simulation, giving membrane potential
 %                                       (in mV) of each node segment.
 %           internode length -          (1x(N-1))-array giving the length (in mm) of each of the (N-1) internodes.
-%           time -                      (1xT)-array, where T is the number of time points simulated giving the 
+%           time -                      (1xT)-array, where T is the number of time points simulated giving the
 %                                       the simulation time (in ms) of each sample point.
+%           currents -                  (optional) structure describing the per-node-segment active (ionic)
+%                                       currents. Only populated if `recordCurrents' is set (see below);
+%                                       otherwise the fields are empty. Used for energy bookkeeping. Fields:
+%                                         .channames    - 1xC cell of channel names (e.g. 'Fast Na+').
+%                                         .erev         - 1xC reversal potentials (mV).
+%                                         .charge       - (NxC) time-integrated |current| per node segment per
+%                                                         channel (nC); the metabolic-cost proxy.
+%                                         .chargeSigned - (NxC) signed time-integrated current per node segment (nC).
+%                                         .nodeColumns  - indices mapping node segments to membrane-potential columns.
+%                                         .units        - struct of unit strings.
+%                                         .I            - (TxNxC) time-resolved current (uA); only if recordCurrents>=2.
 %
 %       Inputs:
 %           par -                       structure containing the parameters of the myelinated axon.
@@ -16,6 +27,11 @@ function [MEMBRANE_POTENTIAL, INTERNODE_LENGTH, TIME_VECTOR] = Model(par, filena
 %                                       time vector. If left empty (default), nothing will be saved.
 %           verbose -                   if 1 (default) will print progress of simulation. Otherwise, if 0
 %                                       (false) there will be no output.
+%           recordCurrents -            controls recording of active ionic currents (default 0/false). If 0,
+%                                       nothing is recorded and the model behaves exactly as before. If 1/true,
+%                                       the time integral of the ionic current is accumulated per node segment
+%                                       and returned in CURRENTS (cheap). If 2, the full time-resolved current
+%                                       is additionally stored in CURRENTS.I (memory heavy: T x N x C doubles).
 
 
 % Check argument input.
@@ -25,6 +41,10 @@ if CheckValue(filename, 'string', [], 'emptyOK')
 end
 
 VariableDefault('isVerbose', true)
+
+VariableDefault('recordCurrents', false)
+% recordLevel: 0 = off (default), 1 = integrated charge, >=2 = full current trace.
+recordLevel = double(recordCurrents);
 
 % Simulation parameters:
 % Time step, total amount of time, number of time points.
@@ -284,6 +304,21 @@ Vsave                                       = nan(T+1, nns*nnodes);
 Vsave(1, :)                                 = V1(nodes);
 
 
+% ---- Optional ionic-current recording (for energy bookkeeping) ------- %
+% Active (ionic) currents are generated only at the nodes, so they are
+% recorded per node segment, ordered to match the columns of Vsave/nodes.
+% Current is g_open*(V - Erev) = mS*mV = uA in simulation units; integrating
+% over time (ms) yields charge in nC.
+nChan                                       = length(par.node.elec.act);
+if recordLevel >= 1 && nChan >= 1
+    chargeAbs                               = zeros(nns*nnodes, nChan);   % integral of |I| dt (nC)
+    chargeSigned                            = zeros(nns*nnodes, nChan);   % integral of  I  dt (nC)
+    if recordLevel >= 2
+        Itrace                              = zeros(T+1, nns*nnodes, nChan); % time-resolved current (uA)
+    end
+end
+
+
 if isVerbose
     updatemessage = (0:0.05:1);
     printmessage = round(T * updatemessage);
@@ -331,6 +366,18 @@ for i = 1 : T
         end
         activesum = activesum + actcond{j} .* tempprod / 2;
         activesum2 = activesum2 + actcond{j} .* tempprod * erevval(j);
+
+        % Record the ionic current of this channel at every node segment.
+        % I_j = g_open_j .* (V_node - Erev_j); reuses tempprod (open prob)
+        % and V2(nodes+1,2) (the node voltage at the current time step).
+        if recordLevel >= 1
+            Ichan = (actcond{j} .* tempprod) .* (V2(nodes + 1, 2) - erevval(j));
+            chargeAbs(:, j)    = chargeAbs(:, j)    + abs(Ichan) * dt;
+            chargeSigned(:, j) = chargeSigned(:, j) + Ichan * dt;
+            if recordLevel >= 2
+                Itrace(i, :, j) = Ichan.';
+            end
+        end
     end
     
     % Update active entries of the A matrix.
@@ -365,9 +412,29 @@ end
 MEMBRANE_POTENTIAL  = Vsave;
 TIME_VECTOR         = 0:dt:tmax;
 
+% Assemble the optional ionic-current output (empty unless recording was on).
+CURRENTS = struct('channames', {{}}, 'erev', [], 'charge', [], ...
+                  'chargeSigned', [], 'nodeColumns', [], 'units', struct(), 'I', []);
+if recordLevel >= 1 && nChan >= 1
+    CURRENTS.channames    = {par.node.elec.act.channames};
+    CURRENTS.erev         = erevval(:).';
+    CURRENTS.charge       = chargeAbs;
+    CURRENTS.chargeSigned = chargeSigned;
+    CURRENTS.nodeColumns  = nodes;
+    CURRENTS.units        = struct('current', 'uA', 'charge', 'nC', ...
+                                   'time', 'ms', 'voltage', 'mV');
+    if recordLevel >= 2
+        CURRENTS.I = Itrace;
+    end
+end
+
 % Save the output.
 if ~isempty(filename)
-    save(filename, 'TIME_VECTOR', 'MEMBRANE_POTENTIAL', 'INTERNODE_LENGTH', 'par')
+    if recordLevel >= 1
+        save(filename, 'TIME_VECTOR', 'MEMBRANE_POTENTIAL', 'INTERNODE_LENGTH', 'par', 'CURRENTS')
+    else
+        save(filename, 'TIME_VECTOR', 'MEMBRANE_POTENTIAL', 'INTERNODE_LENGTH', 'par')
+    end
 end
 
 
