@@ -33,6 +33,8 @@ function R = sweepPrecision(Lvalues_um, varargin)
 %                           first parfor start one. Set false to force serial. For workers
 %                           to find the code, set the path (addpath(genpath(repoRoot)))
 %                           before the pool starts.
+%       'Progress'        - show an in-place per-length progress bar with elapsed
+%                           time and ETA (default true). Set false for quiet logs.
 %       (builder options ScaleSegments/MinSegments/MaxSegments/PreserveParanode
 %        are forwarded to buildClampedAxon.)
 %
@@ -59,6 +61,7 @@ saveCsv   = getOption(varargin, 'SaveCsv', []);
 tmaxMs    = getOption(varargin, 'Tmax_ms', []);
 dtUs      = getOption(varargin, 'Dt_us', []);
 parWanted = getOption(varargin, 'Parallel', true);
+showProg  = getOption(varargin, 'Progress', true);
 builderOpts = builderOptions(varargin);
 
 % Trials are independent, so they run over a parfor. 'parfor (k, M)' caps the
@@ -77,12 +80,16 @@ nL = numel(Lvalues_um);
 
 L_act = nan(nL,1); nIntn = nan(nL,1); nNode = nan(nL,1); dNode = nan(nL,1);
 dist  = nan(nL,1); meanLat = nan(nL,1); sig = nan(nL,1); signorm = nan(nL,1); nValid = zeros(nL,1);
+failed_rate = nan(nL,1);   % fraction of trials with no valid distal arrival, per length
 
 if verbose
     fprintf('Precision sweep: total = %.0f um, %d lengths x %d trials, noise = %g nA\n', ...
             totalLen, nL, nTrials, noiseAmp);
-    fprintf('%7s %6s %9s %12s %14s\n','L[um]','nIntn','d[mm]','sigma_t[ms]','sigma[ms/mm]');
+    if ~showProg
+        fprintf('%7s %6s %9s %12s %14s\n','L[um]','nIntn','d[mm]','sigma_t[ms]','sigma[ms/mm]');
+    end
 end
+t0 = tic;   % elapsed / ETA reference for the progress display
 
 for q = 1:nL
     L = Lvalues_um(q);
@@ -104,13 +111,30 @@ for q = 1:nL
         distalNode = min(max(distalNode, 2), numel(pos) - 1);  % keep interior
         d = pos(distalNode);                                % mm from stimulated node 1
 
-        % Trials in parallel (serial if no pool / Parallel = false).
+        % Trials in parallel (serial if no pool / Parallel = false). They run in
+        % chunks so a progress percentage can update between chunks without a
+        % Parallel-Toolbox DataQueue. Chunking does NOT change results: trial k
+        % always uses seed baseSeed+k.
         arrivals = nan(1, nTrials);
-        parfor (k = 1:nTrials, Mworkers)
-            park = par;
-            park.noise.seed = baseSeed + k;                 % independent, reproducible
-            Vk = Model(park, [], false, 0);                 % noisy, currents off
-            arrivals(k) = arrivalTime(Vk(:, distalNode), dt, vcross);
+        if showProg
+            nChunks = max(1, min(10, floor(nTrials / 5)));
+            fprintf('[%d/%d] L=%5.1f um  %3.0f%%', q, nL, L, 0);
+        else
+            nChunks = 1;
+        end
+        edges = round(linspace(0, nTrials, nChunks + 1));
+        for c = 1:nChunks
+            idx    = (edges(c) + 1):edges(c + 1);
+            aChunk = nan(1, numel(idx));
+            parfor (j = 1:numel(idx), Mworkers)
+                kk = idx(j);
+                park = par;
+                park.noise.seed = baseSeed + kk;            % independent, reproducible
+                Vk = Model(park, [], false, 0);             % noisy, currents off
+                aChunk(j) = arrivalTime(Vk(:, distalNode), dt, vcross);
+            end
+            arrivals(idx) = aChunk;
+            if showProg, fprintf('\b\b\b\b%3.0f%%', 100 * edges(c + 1) / nTrials); end
         end
 
         good = ~isnan(arrivals);
@@ -119,12 +143,19 @@ for q = 1:nL
         meanLat(q)= mean(arrivals(good));
         sig(q)    = std(arrivals(good));
         signorm(q)= sig(q) / d;
-        fail_rate = 1 - nValid(q) / nTrials;
+        failed_rate(q) = 1 - nValid(q) / nTrials;
+
+        if showProg   % finalise this length's progress line with the result + ETA
+            el = toc(t0);  eta = el / q * (nL - q);
+            fprintf('\b\b\b\b  sigma_t=%.3g ms  fail=%2.0f%%  [elapsed %.1f min, ETA %.1f min]\n', ...
+                    sig(q), 100 * failed_rate(q), el/60, eta/60);
+        end
 
     catch err
-        if verbose, fprintf('  L = %g um FAILED: %s\n', L, err.message); end
+        if showProg, fprintf('\n'); end
+        if verbose || showProg, fprintf('  L = %g um FAILED: %s\n', L, err.message); end
     end
-    if verbose
+    if verbose && ~showProg
         fprintf('%7.1f %6d %9.3f %12.4g %14.4g\n', L, nIntn(q), dist(q), sig(q), signorm(q));
     end
 
@@ -138,13 +169,13 @@ end
 R = struct();
 R.L_um = Lvalues_um(:); R.L_actual_um = L_act; R.nIntn = nIntn; R.nNode = nNode;
 R.distalNode = dNode; R.distance_mm = dist; R.meanLatency_ms = meanLat;
-R.sigma_t_ms = sig; R.sigma_per_mm = signorm; R.nValid = nValid;
+R.sigma_t_ms = sig; R.sigma_per_mm = signorm; R.nValid = nValid; R.failed_rate = failed_rate;
 R.clampedTotal_um = totalLen; R.nTrials = nTrials; R.noiseAmp_nA = noiseAmp;
 try
     R.table = table(R.L_um, R.L_actual_um, R.nIntn, R.distance_mm, ...
-                    R.meanLatency_ms, R.sigma_t_ms, R.sigma_per_mm, R.nValid, ...
+                    R.meanLatency_ms, R.sigma_t_ms, R.sigma_per_mm, R.nValid, R.failed_rate, ...
         'VariableNames', {'L_um','L_actual_um','nIntn','distance_mm', ...
-                          'meanLatency_ms','sigma_t_ms','sigma_per_mm','nValid'});
+                          'meanLatency_ms','sigma_t_ms','sigma_per_mm','nValid','failed_rate'});
 catch
     R.table = [];
 end
@@ -158,7 +189,7 @@ fid = fopen(fname, 'w');
 if fid < 0, return, end
 fprintf(fid, 'L_um,L_actual_um,nIntn,nNode,distalNode,distance_mm,meanLatency_ms,sigma_t_ms,sigma_per_mm,nValid,failed_rate\n');
 for i = 1:numel(L)
-    fprintf(fid, '%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n', ...
+    fprintf(fid, '%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n', ...
             L(i), La(i), nI(i), nN(i), dN(i), d(i), ml(i), s(i), sn(i), nv(i),failed_rate(i));
 end
 fclose(fid);
