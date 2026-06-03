@@ -119,6 +119,8 @@ for q = 1:nL
         meanLat(q)= mean(arrivals(good));
         sig(q)    = std(arrivals(good));
         signorm(q)= sig(q) / d;
+        fail_rate = 1 - nValid(q) / nTrials;
+
     catch err
         if verbose, fprintf('  L = %g um FAILED: %s\n', L, err.message); end
     end
@@ -129,7 +131,7 @@ for q = 1:nL
     % Crash-safe checkpoint after each length.
     if ~isempty(saveCsv)
         writePrecisionCsv(saveCsv, Lvalues_um, L_act, nIntn, nNode, dNode, dist, ...
-                          meanLat, sig, signorm, nValid);
+                          meanLat, sig, signorm, nValid,failed_rate);
     end
 end
 
@@ -151,13 +153,13 @@ end
 
 % ===================== local helpers =====================
 
-function writePrecisionCsv(fname, L, La, nI, nN, dN, d, ml, s, sn, nv)
+function writePrecisionCsv(fname, L, La, nI, nN, dN, d, ml, s, sn, nv,failed_rate)
 fid = fopen(fname, 'w');
 if fid < 0, return, end
-fprintf(fid, 'L_um,L_actual_um,nIntn,nNode,distalNode,distance_mm,meanLatency_ms,sigma_t_ms,sigma_per_mm,nValid\n');
+fprintf(fid, 'L_um,L_actual_um,nIntn,nNode,distalNode,distance_mm,meanLatency_ms,sigma_t_ms,sigma_per_mm,nValid,failed_rate\n');
 for i = 1:numel(L)
     fprintf(fid, '%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n', ...
-            L(i), La(i), nI(i), nN(i), dN(i), d(i), ml(i), s(i), sn(i), nv(i));
+            L(i), La(i), nI(i), nN(i), dN(i), d(i), ml(i), s(i), sn(i), nv(i),failed_rate(i));
 end
 fclose(fid);
 end
