@@ -27,6 +27,12 @@ function R = sweepPrecision(Lvalues_um, varargin)
 %       'Tmax_ms'         - override sim duration (ms); raise if the distal node never
 %                           fires (nValid = 0). Default keeps the axon's own tmax.
 %       'Dt_us'           - override the time step (us); coarser = faster (re-tune noise).
+%       'Parallel'        - run the per-length trials over a parfor (default true).
+%                           Needs the Parallel Computing Toolbox to actually parallelise
+%                           (otherwise it runs serially); start a parpool, or just let the
+%                           first parfor start one. Set false to force serial. For workers
+%                           to find the code, set the path (addpath(genpath(repoRoot)))
+%                           before the pool starts.
 %       (builder options ScaleSegments/MinSegments/MaxSegments/PreserveParanode
 %        are forwarded to buildClampedAxon.)
 %
@@ -52,7 +58,14 @@ verbose   = getOption(varargin, 'Verbose', true);
 saveCsv   = getOption(varargin, 'SaveCsv', []);
 tmaxMs    = getOption(varargin, 'Tmax_ms', []);
 dtUs      = getOption(varargin, 'Dt_us', []);
+parWanted = getOption(varargin, 'Parallel', true);
 builderOpts = builderOptions(varargin);
+
+% Trials are independent, so they run over a parfor. 'parfor (k, M)' caps the
+% workers at M: Inf uses the pool if one exists (and silently runs serially if
+% there is no Parallel Computing Toolbox / pool), 0 forces serial execution.
+Mworkers = Inf;
+if ~parWanted, Mworkers = 0; end
 
 par0 = axonFcn();
 if isempty(totalLen)
@@ -81,20 +94,23 @@ for q = 1:nL
         par.noise.amp.units      = {1, 'nA', 1};
         par.noise.excludeStimNode = exclStim;
 
-        arrivals    = nan(1, nTrials);
-        distalNode  = NaN; d = NaN; dt = NaN;
-        for k = 1:nTrials
-            par.noise.seed = baseSeed + k;                 % independent, reproducible
-            [V, IL, t] = Model(par, [], false, 0);          % noisy, currents off
-            if k == 1
-                dt  = t(2) - t(1);
-                pos = [0, cumsum(IL(:).')];                 % mm, one per node
-                Ltot_actual = pos(end);
-                [~, distalNode] = min(abs(pos - distFrac * Ltot_actual));
-                distalNode = min(max(distalNode, 2), numel(pos) - 1);  % keep interior
-                d = pos(distalNode);                        % mm from stimulated node 1
-            end
-            arrivals(k) = arrivalTime(V(:, distalNode), dt, vcross);
+        % Geometry first (one deterministic run): node positions, dt, distal node.
+        % Done once up front so the trials can run in any order under parfor.
+        parGeom = par;  parGeom.noise.amp.value = 0;        % noise off for geometry
+        [~, IL, tg] = Model(parGeom, [], false, 0);
+        dt  = tg(2) - tg(1);
+        pos = [0, cumsum(IL(:).')];                         % mm, one per node
+        [~, distalNode] = min(abs(pos - distFrac * pos(end)));
+        distalNode = min(max(distalNode, 2), numel(pos) - 1);  % keep interior
+        d = pos(distalNode);                                % mm from stimulated node 1
+
+        % Trials in parallel (serial if no pool / Parallel = false).
+        arrivals = nan(1, nTrials);
+        parfor (k = 1:nTrials, Mworkers)
+            park = par;
+            park.noise.seed = baseSeed + k;                 % independent, reproducible
+            Vk = Model(park, [], false, 0);                 % noisy, currents off
+            arrivals(k) = arrivalTime(Vk(:, distalNode), dt, vcross);
         end
 
         good = ~isnan(arrivals);
