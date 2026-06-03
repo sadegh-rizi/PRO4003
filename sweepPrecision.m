@@ -119,7 +119,7 @@ for q = 1:nL
         meanLat(q)= mean(arrivals(good));
         sig(q)    = std(arrivals(good));
         signorm(q)= sig(q) / d;
-        fail_rate = 1 - nValid(q) / nTrials;
+        failed_rate = 1 - nValid(q) / nTrials;
 
     catch err
         if verbose, fprintf('  L = %g um FAILED: %s\n', L, err.message); end
