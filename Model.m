@@ -86,8 +86,13 @@ intn2intn = 1 : tnf;
 intn2intn([node2node, node2intn, intn2node]) = [];
 
 % Inject current into first node for now.
-Istim = zeros(tns, 2, T);
-Istim(1:nns, 1, 1:1+DUR) = Is/nns;
+% Build the stimulus as a single 2D pattern applied during the first 1+DUR
+% steps, rather than a full (tns x 2 x T) array. The 3D version is almost all
+% zeros and can be gigabytes for long / finely-resolved runs; this is identical
+% in result but far cheaper in memory and allocation time.
+Istim0           = zeros(tns, 2);
+Istim0(1:nns, 1) = Is/nns;
+ZeroStim         = zeros(tns, 2);
 
 
 % ======================= NOISE SETUP ================================== %
@@ -428,7 +433,8 @@ for i = 1 : T
     A(L) = offset + activesum';
     
     % Calculate passive part of the RHS of equation (*)
-    V1 = Istim(:,:,i)...
+    if i <= 1 + DUR, Istim_i = Istim0; else, Istim_i = ZeroStim; end
+    V1 = Istim_i...
           +(V2(1:end-2,2:3)-V2(2:end-1,2:3)).*Gaxialpad(1:end-1,:)...
           -(V2(2:end-1,2:3)-V2(3:end,2:3)).*Gaxialpad(2:end,:)...
           +Radialpre(:,1:2).*(diff(V2(2:end-1,1:3),1,2))...
