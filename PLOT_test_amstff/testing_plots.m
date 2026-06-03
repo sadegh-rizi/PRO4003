@@ -2,7 +2,7 @@
 
 % import data
 cvFile = 'CVEnergy_table.csv';
-precisionFile = 'results_aim1/precision_batch_120-140-160.csv';
+precisionFile = 'results_aim1/precision.csv';
 
 Tcv = readtable(cvFile);
 Tp = readtable(precisionFile);
@@ -16,38 +16,8 @@ ATP_mol_mm = Tcv.atp_mol_per_mm(:);         % mol ATP/AP/mm
 propagated = logical(Tcv.propagated(:));
 
 % extract vectors from precision (dummy values)
-precision_sigma_t_ms = [ ...
-    0.095293207, ...
-    0.096545629, ...
-    0.097798050, ...
-    0.099050471, ...
-    0.100302893, ...
-    0.101555314, ...
-    0.102807736, ...
-    0.104060157, ...
-    0.105312579, ...
-    0.106565000, ... % real, L = 120 um
-    0.126088000, ...
-    0.145611000, ... % real, L = 140 um
-    0.135946000, ...
-    0.126281000  ... % real, L = 160 um
-    ];
-precision_sigma_per_mm = [ ...
-    0.028915997, ... 30
-    0.029312442, ... 40
-    0.030708887, ... 50
-    0.029105331, ... 60
-    0.030501776, ... 70
-    0.031098221, ... 80
-    0.030294666, ... 90
-    0.031691110, ... 100
-    0.036087555, ... 110
-    0.032484000, ... % real, L = 120 um
-    0.038612500, ... 130
-    0.044741000, ... % real, L = 140 um
-    0.040987500, ... 150
-    0.037234000  ... % real, L = 160 um
-    ];
+precision_sigma_t_ms = Tp.sigma_t_ms(:);
+precision_sigma_per_mm = Tp.sigma_per_mm(:);
 
 
 %% 2D scatter plot CV vs Energy cost for diff internode Ls
