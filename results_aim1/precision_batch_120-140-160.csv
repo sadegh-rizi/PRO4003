@@ -1,4 +1,0 @@
-L_um,L_actual_um,nIntn,nNode,distalNode,distance_mm,meanLatency_ms,sigma_t_ms,sigma_per_mm,nValid,failed_rate
-120,120,34,35,28,3.2805,0.360156,0.106565,0.0324844,50,0
-140,140,29,30,24,3.2545,0.373454,0.145611,0.0447414,50,0
-160,160,26,27,22,3.3915,0.353604,0.126281,0.0372345,50,0
