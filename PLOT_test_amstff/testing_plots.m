@@ -1,7 +1,7 @@
 %% Plot testing
 
 % import data
-cvFile = 'CVEnergy_table.csv';
+cvFile = 'results_aim1/CVEnergy_table.csv';
 precisionFile = 'results_aim1/precision.csv';
 
 Tcv = readtable(cvFile);
