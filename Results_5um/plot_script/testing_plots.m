@@ -1,5 +1,5 @@
 %% Plot testing -----------------------------------------------------------
-
+clc; clear;
 % import data
 cvFile = 'Results_5um/CVEnergy_table_every_5um.csv';
 precisionFile = 'Results_5um/precise_precision.csv';
@@ -20,24 +20,29 @@ precision_sigma_t_ms = Tp.sigma_t_ms(:);
 precision_sigma_per_mm = Tp.sigma_per_mm(:);
 precision_node_n = Tp.nNode(:);
 precision_intn_n = Tp.nIntn(:);
-precision_intn_l = Tp.L_um(:);
+precision_intn_l = Tp.L_actual_um(:);
 
 
-%% Plot precision vs internode number & length ----------------------------
+%% Plot intn L vs internode number & length -------------------------------
 
 figure('Name','Internode Length vs Internode Number','Color','w');
-scatter(precision_intn_n, precision_intn_l, 80, 'filled');
-xlabel('Node Number');
-ylabel('Precision \sigma (ms/mm)');
+scatter(precision_intn_l, precision_intn_n, 80, 'filled');
+xlabel('Internode Length');
+ylabel('Internode Number');
 title('Internode Length vs Internode Number');
 grid on; box on;
 
-figure('Name','Precision vs Internode Number','Color','w');
-scatter(precision_intn_n, precision_intn_l, 80, 'filled');
-xlabel('Internode Number');
-ylabel('Precision \sigma (ms/mm)');
-title('Precision vs Node Number');
+%% Plot precision vs intn_L & length --------------------------------------
+figure('Name','Precision vs Internode Length with Lines','Color','w');
+scatter(precision_intn_l, precision_sigma_per_mm, 80, 'filled');
+hold on;
+plot(precision_intn_l, precision_sigma_per_mm, 'k-', 'LineWidth', 0.75);  % links points
+xlabel('Internode Length');
+ylabel('Expected Arrival std. \sigma (ms/mm)');
+title('Expected Arrival std. vs Internode Length with Connecting Lines');
 grid on; box on;
+hold off;
+
 
 %% 2D scatter plot CV vs Energy cost for diff internode Ls ----------------
 
@@ -56,6 +61,45 @@ ylabel(cb, 'Internode length L (\mum)');
 xlabel('Conduction velocity (m/s)');
 ylabel('ATP cost (mol ATP / AP / mm)');
 title('CV vs ATP cost by internode length');
+grid on; box on;
+
+
+%% 2D scatter plot Energy cost vs Precision for diff internode Ls ---------
+
+figure('Name','2D energy-precision tradeoff','Color','w');
+scatter(ATP_mol_mm, precision_sigma_per_mm, 80, L_um, 'filled');
+hold on;
+plot(ATP_mol_mm, precision_sigma_per_mm, 'k-', 'LineWidth', 0.75);  % links sweep order
+for i = 1:numel(L_um)
+    text(ATP_mol_mm(i), precision_sigma_per_mm(i), sprintf('  %g', L_um(i)), 'FontSize', 8);
+end
+hold off;
+
+colormap(jet(256));
+cb = colorbar;
+ylabel(cb, 'Internode length L (\mum)');
+xlabel('ATP cost (mol ATP / AP / mm)');
+ylabel('Expected Arrival std. \sigma (ms/mm)');
+title('CV vs Expected Arrival std. \sigma (ms/mm) by Internode length');
+grid on; box on;
+
+%% 2D scatter plot CV vs Precision for diff internode Ls ----------------
+
+figure('Name','2D speed-precision tradeoff','Color','w');
+scatter(CV_mps, precision_sigma_per_mm, 80, L_um, 'filled');
+hold on;
+plot(CV_mps, precision_sigma_per_mm, 'k-', 'LineWidth', 0.75);  % links sweep order
+for i = 1:numel(L_um)
+    text(CV_mps(i), precision_sigma_per_mm(i), sprintf('  %g', L_um(i)), 'FontSize', 8);
+end
+hold off;
+
+colormap(jet(256));
+cb = colorbar;
+ylabel(cb, 'Internode length L (\mum)');
+xlabel('Conduction velocity (m/s)');
+ylabel('Expected Arrival std. \sigma (ms/mm)');
+title('CV vs Expected Arrival std. \sigma (ms/mm) by Internode length');
 grid on; box on;
 
 
