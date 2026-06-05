@@ -1,4 +1,4 @@
-%% Plot testing
+%% Plot testing -----------------------------------------------------------
 
 % import data
 cvFile = 'Results_5um/CVEnergy_table_every_5um.csv';
@@ -18,9 +18,28 @@ propagated = logical(Tcv.propagated(:));
 % extract vectors from precision (dummy values)
 precision_sigma_t_ms = Tp.sigma_t_ms(:);
 precision_sigma_per_mm = Tp.sigma_per_mm(:);
+precision_node_n = Tp.nNode(:);
+precision_intn_n = Tp.nIntn(:);
+precision_intn_l = Tp.L_um(:);
 
 
-%% 2D scatter plot CV vs Energy cost for diff internode Ls
+%% Plot precision vs internode number & length ----------------------------
+
+figure('Name','Internode Length vs Internode Number','Color','w');
+scatter(precision_intn_n, precision_intn_l, 80, 'filled');
+xlabel('Node Number');
+ylabel('Precision \sigma (ms/mm)');
+title('Internode Length vs Internode Number');
+grid on; box on;
+
+figure('Name','Precision vs Internode Number','Color','w');
+scatter(precision_intn_n, precision_intn_l, 80, 'filled');
+xlabel('Internode Number');
+ylabel('Precision \sigma (ms/mm)');
+title('Precision vs Node Number');
+grid on; box on;
+
+%% 2D scatter plot CV vs Energy cost for diff internode Ls ----------------
 
 figure('Name','2D speed-energy tradeoff','Color','w');
 scatter(CV_mps, ATP_mol_mm, 80, L_um, 'filled');
@@ -40,7 +59,7 @@ title('CV vs ATP cost by internode length');
 grid on; box on;
 
 
-%% 3D mesh plot (experimental and prolly a bit broken)
+%% 3D mesh plot (experimental and prolly a bit broken) --------------------
 figure('Name','3D CV-energy-precision tradeoff','Color','w');
 hold on;
 
