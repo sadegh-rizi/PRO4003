@@ -36,8 +36,8 @@ function R = sweepPrecision2(Lvalues_um, varargin)
 
 axonFcn   = getOption(varargin, 'AxonFcn', @Carcamo2017CortexAxon);
 totalLen  = getOption(varargin, 'TotalLength_um', []);
-noiseAmp  = getOption(varargin, 'NoiseAmp_nA', 0.05);
-nTrials   = getOption(varargin, 'nTrials', 100);
+noiseAmp  = getOption(varargin, 'NoiseAmp_nA', 0.02);
+nTrials   = getOption(varargin, 'nTrials', 2);
 vcross    = getOption(varargin, 'Vcross', -20);
 distFrac  = getOption(varargin, 'DistalFrac', 0.8);
 exclStim  = getOption(varargin, 'ExcludeStimNode', false);

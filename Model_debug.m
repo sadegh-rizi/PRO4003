@@ -85,16 +85,6 @@ intn2node = (nns+nis):(nns+nis):tnf;
 intn2intn = 1 : tnf;
 intn2intn([node2node, node2intn, intn2node]) = [];
 
-% Inject current into first node for now.
-% Build the stimulus as a single 2D pattern applied during the first 1+DUR
-% steps, rather than a full (tns x 2 x T) array. The 3D version is almost all
-% zeros and can be gigabytes for long / finely-resolved runs; this is identical
-% in result but far cheaper in memory and allocation time.
-Istim0           = zeros(tns, 2);
-Istim0(1:nns, 1) = Is/nns;
-ZeroStim         = zeros(tns, 2);
-
-
 % ======================= NOISE SETUP ================================== %
 % Optional independent Gaussian current noise at the nodes, for the
 % timing-precision axis. Fully OPTIONAL and backward compatible: if `par'
@@ -107,22 +97,34 @@ ZeroStim         = zeros(tns, 2);
 %                                 global stream untouched (independent draws
 %                                 across successive calls -> good for trials).
 % par.noise.excludeStimNode     - if true, no noise at the stimulated node.
-noiseStd        = 0;
-noiseSegmentIdx = nodes;                 % default: every node segment
-if isfield(par, 'noise')
-    if isfield(par.noise, 'amp') && isfield(par.noise.amp, 'value') ...
-            && ~isempty(par.noise.amp.value) && par.noise.amp.value > 0
-        noiseStd = simunits(par.noise.amp.units) * par.noise.amp.value;
-    end
-    if isfield(par.noise, 'excludeStimNode') && ~isempty(par.noise.excludeStimNode) ...
-            && par.noise.excludeStimNode
-        noiseSegmentIdx(1:nns) = [];     % drop the stimulated first node
-    end
-    if isfield(par.noise, 'seed') && ~isempty(par.noise.seed)
-        rng(par.noise.seed);
-    end
+
+% Convert dt to seconds
+dt_sec = simunits(par.sim.dt.units) * par.sim.dt.value;
+% White‑noise standard deviation in amperes: sigma * sqrt(dt)
+if isfield(par.noise,'amp')
+    sigmaA = par.sim.noiseAmp * 1e-9;         % e.g. noiseAmp in nA
+    %sigmaA = simunits(par.noise.amp.units) * par.noise.amp.value;
+    noiseStd = sigmaA * sqrt(dt_sec);
+else
+    noiseStd = 0;
 end
-useNoise = noiseStd > 0;
+
+% noiseSegmentIdx = nodes;                 % default: every node segment
+% 
+% if isfield(par, 'noise')
+%     if isfield(par.noise, 'amp') && isfield(par.noise.amp, 'value') ...
+%             && ~isempty(par.noise.amp.value) && par.noise.amp.value > 0
+%         noiseStd = simunits(par.noise.amp.units) * par.noise.amp.value;
+%     end
+%     if isfield(par.noise, 'excludeStimNode') && ~isempty(par.noise.excludeStimNode) ...
+%             && par.noise.excludeStimNode
+%         noiseSegmentIdx(1:nns) = [];     % drop the stimulated first node
+%     end
+%     if isfield(par.noise, 'seed') && ~isempty(par.noise.seed)
+%         rng(par.noise.seed);
+%     end
+% end
+% useNoise = noiseStd > 0;
 
 % dt-invariant scaling. A current held constant over a step dt produces a
 % membrane-voltage perturbation that scales with sqrt(dt), so a fixed
@@ -130,7 +132,39 @@ useNoise = noiseStd > 0;
 % Dividing by sqrt(dt) yields a proper Euler-Maruyama white-noise current
 % whose intensity is independent of dt; `par.noise.amp' is then a noise
 % intensity (units: current * sqrt(time)) and must be tuned once.
-noiseStep = noiseStd / sqrt(dt);
+%noiseStep = noiseStd / sqrt(dt);
+
+
+% Inject current into first node for now.
+% Build the stimulus as a single 2D pattern applied during the first 1+DUR
+% steps, rather than a full (tns x 2 x T) array. The 3D version is almost all
+% zeros and can be gigabytes for long / finely-resolved runs; this is identical
+% in result but far cheaper in memory and allocation time.
+% Istim0           = zeros(tns, 2);
+% Istim0(1:nns, 1) = Is/nns;
+
+Istim0 = zeros(tns, 2, T);
+Istim0(1:nns, 1, 1:1+DUR) = Is/nns;
+
+ZeroStim         = zeros(tns, 2);
+
+if noiseStd > 0
+    % Generate independent Gaussian noise for each node and time step
+    nodeCount = par.geo.nnode;
+    T = round(simunits(par.sim.tmax.units) * par.sim.tmax.value / dt_sec);
+    noiseCurrent = noiseStd .* randn(nodeCount, T);
+    % Expand to match the segment indexing; assume noise only on nodes
+    noiseIstim = zeros(size(Istim));  % same shape as Istim
+    nodeSegments = node2intn;         % mapping of nodes into segment indices
+    for k = 1:nodeCount
+        seg = nodeSegments(k);
+        noiseIstim(seg,1,:) = noiseCurrent(k,:);
+    end
+else
+    noiseIstim = 0;
+end
+
+
 
 
 %%%%%%%%%%% GEOMETRY OF THE AXON %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -441,11 +475,13 @@ for i = 1 : T
           -Radialpre(:,2:3).*(diff(V2(2:end-1,2:4),1,2))...
           +Leakpre;
 
+    
+
     % Optional Gaussian current noise at the nodes (no-op when noise is off,
     % so the deterministic path draws no random numbers and is unchanged).
     if useNoise
         V1(noiseSegmentIdx, 1) = V1(noiseSegmentIdx, 1) ...
-            + noiseStep * randn(numel(noiseSegmentIdx), 1);
+             + noiseStep * randn(numel(noiseSegmentIdx), 1);
     end
 
     % Update active segments of RHS.
