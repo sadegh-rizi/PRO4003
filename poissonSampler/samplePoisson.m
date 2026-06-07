@@ -1,62 +1,72 @@
-function lengths = samplePoisson(nInternodes, meanLength, minLength, maxLength)
-%SAMPLEPOISSON Generate heterogeneous internode lengths using a Poisson process.
-%   LENGTHS = SAMPLEPOISSON(NINTERNODES, MEANLENGTH) returns a row vector of
-%   NINTERNODES positive internode lengths drawn from an exponential
-%   distribution with mean MEANLENGTH..
+function lengths = samplePoisson(nInternodes, meanLength_um, minLength_um, maxLength_um, seed)
+%SAMPLEPOISSON Sample heterogeneous internode lengths from a bounded Poisson distribution.
 %
-%   LENGTHS = SAMPLEPOISSON(NINTERNODES, MEANLENGTH, MINLENGTH, MAXLENGTH)
-%   allows you to specify optional minimum and maximum allowable
-%   internode lengths.  Internodes whose length falls outside the
-%   [MINLENGTH, MAXLENGTH] range are resampled until they satisfy the
-%   constraints. 
+%   lengths = samplePoisson(nInternodes, meanLength_um, minLength_um, maxLength_um)
+%   returns a 1 x nInternodes vector of internode lengths in micrometres.
 %
-%   IMPORTANT; internode number must be precomputed after axon length 
-%   is clamped, otherwise use the nInternodes argument to manually define 
-%   the number of internodes in the axon.
+%   The sampled values follow a Poisson distribution with mean meanLength_um,
+%   truncated to the interval [minLength_um, maxLength_um].
+%
+%   Example:
+%       L = samplePoisson(50, 80, 40, 160);
+%       par = UpdateInternodeLength(par, L);
 
-%   Example usage:
-%     % Generate 50 internodes with mean length 60 µm and default bounds
-%     lengths = samplePoisson(50, 60);
-%     % Plot histogram of generated lengths
-%     histogram(lengths);
+    narginchk(4, 5);
 
-%   See also RANDOM, EXPRND.
-
-    narginchk(2,4);
-    % Set default bounds if they are not provided
-    if nargin < 3 || isempty(minLength)
-        minLength = 1; % µm – smallest plausible node of Ranvier
+    if nargin == 5 && ~isempty(seed)
+        rng(seed);
     end
-    if nargin < 4 || isempty(maxLength)
-        maxLength = inf; % no upper limit by default
-    end
+
+    % input checks --------------------------------------------------------
     if ~isscalar(nInternodes) || nInternodes <= 0 || floor(nInternodes) ~= nInternodes
-        error('nInternodes must be a positive integer');
+        error('nInternodes must be a positive integer.');
     end
-    if meanLength <= 0
-        error('meanLength must be a positive scalar');
+
+    if ~isscalar(meanLength_um) || meanLength_um <= 0
+        error('meanLength_um must be a positive scalar.');
     end
-    if minLength <= 0
-        error('minLength must be positive');
+
+    if ~isscalar(minLength_um) || ~isscalar(maxLength_um)
+        error('minLength_um and maxLength_um must be scalar values.');
     end
-    if maxLength < minLength
-        error('maxLength must be greater than or equal to minLength');
+
+    if minLength_um <= 0 || maxLength_um <= 0
+        error('minLength_um and maxLength_um must be positive.');
     end
-    % Preallocate output
+
+    if maxLength_um < minLength_um
+        error('maxLength_um must be greater than or equal to minLength_um.');
+    end
+
+    % Poisson values are integer-valued.
+    minLength_um = ceil(minLength_um);
+    maxLength_um = floor(maxLength_um);
+
+    if maxLength_um < minLength_um
+        error('No integer lengths exist inside the requested min/max range.');
+    end
+
+    % bounded Poisson probability mass function (PMF) ---------------------
+    k = minLength_um:maxLength_um;
+
+    % formula log(P(X = k)) = k*log(lambda) - lambda - log(k!)
+    % gammaln(k+1) is log(k!) and is numerically stable.
+    logP = k .* log(meanLength_um) - meanLength_um - gammaln(k + 1);
+
+    % Shift before exponentiating to avoid numerical underflow.
+    P = exp(logP - max(logP));
+
+    % Truncate and renormalise.
+    P = P / sum(P);
+
+    CDF = cumsum(P);
+
+    % sample from the cummulative distribution function (CDF) -------------
     lengths = zeros(1, nInternodes);
-    % Generate lengths one by one, resampling as needed
+
     for ii = 1:nInternodes
-        len = 0;
-        while len < minLength || len > maxLength
-            % Exponential distribution with mean equal to meanLength
-            % Equivalent to inter-event intervals of a Poisson process
-            u = rand();
-            % Avoid log(0)
-            if u == 0
-                u = eps;
-            end
-            len = -meanLength * log(u);
-        end
-        lengths(ii) = len;
+        u = rand();
+        idx = find(u <= CDF, 1, 'first');
+        lengths(ii) = k(idx);
     end
 end
