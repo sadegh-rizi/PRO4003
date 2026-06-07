@@ -70,3 +70,7 @@ function lengths = samplePoisson(nInternodes, meanLength_um, minLength_um, maxLe
         lengths(ii) = k(idx);
     end
 end
+
+
+
+
