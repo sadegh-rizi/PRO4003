@@ -1,4 +1,4 @@
-function R = sweepPrecision(Lvalues_um, varargin)
+function R = sweepPrecision_with_raw(Lvalues_um, varargin)
 %SWEEPPRECISION  Timing precision across internode lengths (clamped total, noisy trials).
 %
 %   R = SWEEPPRECISION(Lvalues_um, ...)
@@ -249,4 +249,3 @@ for k = 1:2:numel(args) - 1
 end
 end
 
-```
