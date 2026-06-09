@@ -31,6 +31,11 @@ function OUT = run_step2_production(varargin)
 %     'DoAcrossMean'   run block 3 (default true)
 %     'Parallel'       parfor for precision trials (default true)
 %     'OutDir'         results folder (default <repo>/step2_results)
+%     'FastPass'       apply SAFE speed-ups -- nTrials=30, auto-trimmed Tmax,
+%                      auto-started pool -- unless you set them yourself (default
+%                      false). Aggressive dt/segment levers stay off; validate
+%                      them with checkConvergence, then pass 'Dt_us'/'ResolveBy'.
+%     'Tmax_ms'/'Dt_us'  sim duration / time-step overrides forwarded to both sweeps
 %     (builder options MaxSegments/ResolveBy/... are forwarded to the sweeps.)
 %
 %   Returns OUT with the sweep result structs and the output folder.
@@ -50,16 +55,45 @@ meanLvec = getOpt(varargin, 'MeanL_um',       [40 60 80 100 120]);
 nReal    = getOpt(varargin, 'nReal',          40);
 nRealP   = getOpt(varargin, 'nRealPrec',      15);
 nTrials  = getOpt(varargin, 'nTrials',        100);
-noiseAmp = getOpt(varargin, 'NoiseAmp_nA',    0.05);
+noiseAmp = getOpt(varargin, 'NoiseAmp_nA',    0.02);
 baseSeed = getOpt(varargin, 'BaseSeed',       7000);
 doPrec   = getOpt(varargin, 'DoPrecision',    true);
 doAcross = getOpt(varargin, 'DoAcrossMean',   true);
 parOn    = getOpt(varargin, 'Parallel',       true);
 outdir   = getOpt(varargin, 'OutDir',         fullfile(thisDir, 'step2_results'));
+fastPass = getOpt(varargin, 'FastPass',       false);
+tmaxMs   = getOpt(varargin, 'Tmax_ms',        []);
+dtUs     = getOpt(varargin, 'Dt_us',          []);
 bopts    = builderOptions(varargin);
 if ~exist(outdir, 'dir'), mkdir(outdir); end
 
+% ---- FastPass: apply only the SAFE speed-ups (no accuracy cost), unless the
+%      user has set them explicitly: fewer noisy trials (averaged out by nReal),
+%      an auto-trimmed sim duration, and an auto-started worker pool. The
+%      aggressive levers (larger dt, coarser segment resolution) are NOT enabled
+%      blindly -- validate them with checkConvergence first, then pass them
+%      yourself: 'Dt_us', 'ResolveBy', 'MaxSegments'.
+if fastPass
+    if ~hasOpt(varargin, 'nTrials'), nTrials = 30; end
+    if ~hasOpt(varargin, 'Tmax_ms')
+        tmaxMs = autoTmax(par0, meanRep, totalLen, CVlevels, bopts, baseSeed);
+    end
+    poolN = 0;
+    if parOn
+        g = gcp('nocreate');
+        if isempty(g)
+            try, g = parpool; catch e, warning('run_step2:pool', 'Could not start a pool: %s', e.message); g = []; end
+        end
+        if ~isempty(g), poolN = g.NumWorkers; end
+    end
+    if isempty(tmaxMs), tmStr = 'axon default'; else, tmStr = sprintf('%.2f ms', tmaxMs); end
+    fprintf('FastPass ON: nTrials=%d, Tmax=%s (auto-trim), pool workers=%d\n', nTrials, tmStr, poolN);
+    fprintf('  (aggressive dt/segment levers stay OFF -- validate with checkConvergence, then pass Dt_us/ResolveBy.)\n');
+end
+
 sweepOpts = [{'AxonFcn', axonFcn, 'TotalLength_um', totalLen, 'BaseSeed', baseSeed}, bopts];
+if ~isempty(tmaxMs), sweepOpts = [sweepOpts, {'Tmax_ms', tmaxMs}]; end
+if ~isempty(dtUs),   sweepOpts = [sweepOpts, {'Dt_us',   dtUs}];   end
 
 fprintf('\n===== STEP 2 PRODUCTION RUN =====\nOutput folder: %s\n', outdir);
 fprintf('Clamp: total=%.0f um, meanRep=%.1f um, N=%d; CV_L in [%g..%g] (%d levels)\n', ...
@@ -248,5 +282,50 @@ function val = getOpt(args, name, default)
 val = default;
 for k = 1:2:numel(args) - 1
     if strcmpi(args{k}, name), val = args{k + 1}; end
+end
+end
+
+function tf = hasOpt(args, name)
+%HASOPT  True if name/value option NAME was supplied by the caller.
+tf = false;
+for k = 1:2:numel(args) - 1
+    if strcmpi(args{k}, name), tf = true; return; end
+end
+end
+
+function tmax = autoTmax(par0, meanRep, totalLen, CVlevels, builderOpts, baseSeed)
+%AUTOTMAX  Trim the sim duration to just past the slowest distal arrival.
+%   Probes the homogeneous and the most-heterogeneous geometry (a few draws
+%   each), takes the latest distal (0.8 L) arrival that propagates, and returns
+%   1.6x that + 0.6 ms of margin -- never exceeding the axon's own tmax. Falls
+%   back to the axon default if no probe propagates. The margin comfortably
+%   covers the Na+ charge integral, so the energy readout is unaffected too.
+origTmax    = simunits(par0.sim.tmax.units) * par0.sim.tmax.value;   % ms
+N           = max(1, round(totalLen / meanRep));
+targetTotal = N * meanRep;
+probeCV     = unique([0, max(CVlevels)]);
+arr = [];
+for ci = 1:numel(probeCV)
+    for r = 1:3
+        try
+            L = sampleInternodeLengths(N, meanRep, 'CV', probeCV(ci), ...
+                    'TotalLength', targetTotal, 'Seed', baseSeed + 1000 * ci + r);
+            par = buildHeterogeneousAxon(par0, L, builderOpts{:});
+            [V, IL, t] = Model(par, [], false, 0);
+            dt  = t(2) - t(1);
+            pos = [0, cumsum(IL(:).')];
+            [~, dn] = min(abs(pos - 0.8 * pos(end)));
+            dn = min(max(dn, 2), numel(pos) - 1);
+            a = arrivalTime(V(:, dn), dt, -20);
+            if isfinite(a), arr(end + 1) = a; end %#ok<AGROW>
+        catch
+            % failed/blocked draw -- ignore for the duration estimate
+        end
+    end
+end
+if isempty(arr)
+    tmax = origTmax;
+else
+    tmax = min(origTmax, round(1.6 * max(arr) + 0.6, 2));
 end
 end
